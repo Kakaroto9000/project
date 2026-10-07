@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+*.egg-info/
+
+# Generated pipeline output -- not source, don't commit
+data/raw_news/*
+data/raw_prices/*
+data/processed/*
+models/*
+!data/raw_news/.gitkeep
+!data/raw_prices/.gitkeep
+!data/processed/.gitkeep
+!models/.gitkeep
+
+.env

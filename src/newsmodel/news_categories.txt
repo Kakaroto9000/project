@@ -1,0 +1,53 @@
+# Event Registry categories (pulled from Event Registry on 2026-10-03).
+# Delete the lines you don't want. Lines starting with # are ignored.
+#
+# Job 1 keeps an article if it's in ANY category listed here.
+# These are iptc categories (the news agencies' standard), nested by topic. A parent
+# category also holds articles that fit none of its sub-categories, so keeping only some
+# sub-categories (without the parent) deliberately leaves the rest out.
+
+# conflict war and peace
+iptc/conflict,_war_and_peace/act_of_terror
+iptc/conflict,_war_and_peace/armed_conflict
+iptc/conflict,_war_and_peace/civil_unrest
+
+# crime law and justice
+iptc/crime,_law_and_justice/crime/corporate_crime
+iptc/crime,_law_and_justice/judiciary/court
+
+# disaster accident and emergency incident
+iptc/disaster,_accident_and_emergency_incident/accident_and_emergency_incident/industrial_accident_and_incident
+iptc/disaster,_accident_and_emergency_incident/accident_and_emergency_incident/industrial_accident_and_incident/nuclear_accident_and_incident
+iptc/disaster,_accident_and_emergency_incident/disaster
+
+# economy business and finance
+iptc/economy,_business_and_finance
+
+# environment
+iptc/environment/natural_resource
+
+# health
+iptc/health/disease_and_condition/communicable_disease/epidemic_and_pandemic
+
+# labor
+iptc/labor/labor_relations/collective_agreements
+iptc/labor/labor_relations/labor_dispute
+iptc/labor/labor_relations/labor_dispute/labor_strike
+iptc/labor/unemployment
+iptc/labor/unions
+
+# politics and government
+iptc/politics_and_government/election
+iptc/politics_and_government/government/government_budget
+iptc/politics_and_government/government/national_security/military_weaponry_and_equipment
+iptc/politics_and_government/government_policy/environmental_policy
+iptc/politics_and_government/government_policy/healthcare_policy
+iptc/politics_and_government/government_policy/nuclear_policy
+iptc/politics_and_government/government_policy/regulation_of_industry
+iptc/politics_and_government/international_relations
+iptc/politics_and_government/political_crisis
+
+# science and technology
+iptc/science_and_technology/biomedical_science
+iptc/science_and_technology/scientific_research
+iptc/science_and_technology/technology_and_engineering

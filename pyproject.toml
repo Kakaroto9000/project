@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "newsmodel"
+version = "0.1.0"
+description = "Predict stock direction (up/down/flat) from news text"
+requires-python = ">=3.10"
+dependencies = [
+    "eventregistry",
+    "anthropic>=1.0",
+    "alpaca-py",
+    "pandas",
+    "pyarrow",
+    "scikit-learn",
+    "joblib",
+]
+
+[project.scripts]
+job1-fetch-news = "newsmodel.jobs:fetch_news"
+job2-tag-submit = "newsmodel.jobs:tag_submit"
+job2-tag-collect = "newsmodel.jobs:tag_collect"
+job3-train = "newsmodel.jobs:train"
+
+[tool.setuptools.packages.find]
+where = ["src"]

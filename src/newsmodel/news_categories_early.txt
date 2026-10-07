@@ -1,0 +1,10 @@
+# Categories for weeks before NEWS_IPTC_START_DATE (config.py).
+# Event Registry only started assigning the iptc/ categories (news_categories.txt) around
+# late May 2026; older articles only carry these broad news/ sections. An article is kept
+# if it's in ANY of these (and contains at least one of NEWS_KEYWORDS).
+news/Business
+news/Politics
+news/Technology
+news/Health
+news/Science
+news/Environment
