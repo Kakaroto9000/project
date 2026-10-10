@@ -16,7 +16,7 @@ import joblib
 
 from newsmodel import config
 from newsmodel.modeling.dataset import DATASET_PATH
-from newsmodel.modeling.train import MODEL_PATH, build_features, chronological_split
+from newsmodel.modeling.train import MODEL_PATH, build_features, chronological_split, load_articles
 
 TRADES_PATH = config.PROCESSED_DIR / "backtest_trades.csv"
 
@@ -30,10 +30,11 @@ def simulate(test_df: pd.DataFrame, predictions):
     Ignores position sizing, concentration, and finite capital -- it tells
     you whether the SIGNAL has edge, not what a portfolio would return.
 
-    Entry is the last close before the news. For news published during
-    market hours that price wasn't actually available after the news came
-    out, so those trades are optimistic -- compare them in the per-timing
-    breakdown.
+    Entry for news while the market is closed is the next official opening
+    price, which you could get with an order placed before the open. For
+    market_hours news it's the last price before the news, up to
+    INTRADAY_BAR_MINUTES old -- slightly optimistic, since you'd trade a
+    little after reading it. Compare them in the per-timing breakdown.
     """
     trades = []
     for (_, row), pred in zip(test_df.iterrows(), predictions):
@@ -51,6 +52,8 @@ def simulate(test_df: pd.DataFrame, predictions):
             "ticker": row["ticker"],
             "news_timestamp": row["news_timestamp"],
             "news_session": row["news_session"],
+            "entry": row["entry"],
+            "role": row["role"],
             "prediction": pred,
             "actual_label": row["label"],
             "gross_return_pct": gross_return_pct,
@@ -84,8 +87,20 @@ def summarize(trades: pd.DataFrame):
     print("\nBreakdown by predicted direction:")
     print(trades.groupby("prediction")["net_return_pct"].agg(["count", "mean", "sum"]))
 
-    print("\nBreakdown by when the news came out (market_hours trades are optimistic):")
+    print("\nBreakdown by when the news came out (market_hours entries are up to")
+    print(f"{config.INTRADAY_BAR_MINUTES} minutes before the news, so slightly optimistic):")
     print(trades.groupby("news_session")["net_return_pct"].agg(["count", "mean", "sum"]))
+
+    print("\nBreakdown by when the trade happened (at_news = right away, next_open = at the next open):")
+    print(trades.groupby("entry")["net_return_pct"].agg(["count", "mean", "sum"]))
+
+    print("\nBreakdown by how the news reaches the ticker (index = an INDEX_TICKERS row):")
+    print(trades.groupby("role")["net_return_pct"].agg(["count", "mean", "sum"]))
+
+    index_trades = trades[trades["ticker"].isin(config.INDEX_TICKERS)]
+    if not index_trades.empty:
+        print("\nBreakdown per market/sector fund:")
+        print(index_trades.groupby("ticker")["net_return_pct"].agg(["count", "mean", "sum"]))
 
 
 def main():
@@ -98,7 +113,7 @@ def main():
     df = pd.read_parquet(DATASET_PATH)
     _, _, test = chronological_split(df)
 
-    predictions = model.predict(build_features(test, featurizer, fit=False))
+    predictions = model.predict(build_features(test, featurizer, fit=False, texts=load_articles()))
 
     trades = simulate(test, predictions)
     summarize(trades)

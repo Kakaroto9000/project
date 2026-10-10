@@ -34,15 +34,17 @@ src/newsmodel/
   collect/                  talks to external APIs
     news.py                 Event Registry  -> raw news
     tickers.py              Claude batch    -> which tickers each article affects
-    prices.py               Alpaca          -> daily price bars
+    prices.py               Alpaca          -> daily + 1-minute price bars
+  market_time.py            market hours: when news came out, when its 30-minute label ends
   modeling/                 local only, no network
     dataset.py              news + prices   -> labeled up/down/flat rows
-    train.py                text + news timing -> logistic regression
+    train.py                text + timing + pre-news prices -> logistic regression
     backtest.py             test-split trades after slippage
 data/raw_news/              news_raw.json -- pulled articles waiting to be tagged (Job 1)
-data/raw_prices/            prices_*.json (prices.py)
+data/raw_prices/            prices_daily_*.parquet, prices_intraday_*.parquet (prices.py)
 data/processed/             news_tagged.json (Job 2),
-                            labeled_dataset.parquet, backtest_trades.csv (Job 3)
+                            labeled_dataset.parquet, articles.parquet (each article's text, once),
+                            backtest_trades.csv (Job 3)
 models/                     baseline_model.joblib (Job 3)
 ```
 
@@ -91,20 +93,20 @@ few hundred articles before a full run.
   low means the source/category mix or the prompt needs adjusting (`NEWS_KEYWORDS` can narrow
   noisy sources).
 - **After Job 3, dataset step**: the up/down/flat distribution. "flat" near
-  0% â†’ `FLAT_THRESHOLD_PCT` too tight; near 90%+ â†’ too wide. Also note the
+  0% â†’ `FLAT_THRESHOLD_FRACTION` too low; near 90%+ â†’ too high. Also note the
   majority-class share â€” that's the baseline the model must beat. Also check
   "When the news came out": the split between weekend, pre-market, market
   hours and after hours.
 - **After Job 3, train step**: **test accuracy vs. the naive "always
   predict the majority class" baseline**. Not clearly above it is a real
   finding. Next things to try, in order of effort: different
-  `HORIZON_DAYS`, different `FLAT_THRESHOLD_PCT`, per-ticker/sector
+  `HORIZON_MINUTES`, different `FLAT_THRESHOLD_FRACTION`, per-ticker/sector
   breakdown, different `TEXT_MAX_FEATURES` or adding `sentiment_score` back
   as a feature â€” and only then a more complex model.
 - **After Job 3, backtest step**: open `backtest_trades.csv` and look for a
   few huge wins/losses dominating the result. In the per-timing breakdown,
-  if `market_hours` trades carry most of the profit, be skeptical â€” those
-  entries use the previous close, which you couldn't actually trade at.
+  if `market_hours` trades carry most of the profit, be a little skeptical:
+  their entry price is up to a minute before the news.
 
 ## Not built yet (by design)
 

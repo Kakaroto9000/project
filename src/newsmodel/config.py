@@ -7,7 +7,7 @@ Central config. Fill in your API keys as environment variables before running:
     export ANTHROPIC_API_KEY="your_key_here"   # Job 2 (Claude ticker tagging)
 
 Everything else here is a tunable knob. Change ONE thing at a time when
-experimenting (e.g. just HORIZON_DAYS) so you know what caused a result
+experimenting (e.g. just HORIZON_MINUTES) so you know what caused a result
 to change.
 """
 
@@ -130,25 +130,61 @@ NEWS_CATEGORIES_EARLY_FILE = Path(__file__).parent / "news_categories_early.txt"
 # you care about, without changing the news query itself.
 TICKERS_UNIVERSE = []
 
-# --- Labeling ---
-# HORIZON_DAYS = 1 means: did price go up, down, or stay flat by next day's
-# close, measured from the price at the moment the news was published.
-# Try 1 first. Once the pipeline works end-to-end, experiment with other
-# values (e.g. 0 for "same day close", 5 for "one week") as a separate run,
-# not a blind guess baked in from the start.
+# --- What the model predicts, and what it sees first (market_time.py, modeling/dataset.py) ---
+# The label is the price move over HORIZON_MINUTES from the first moment you could trade
+# on the news: right away during market hours, otherwise from the next official opening
+# price (the jump to that open is an input, not part of the label). Before predicting,
+# the model sees how the stock and the market moved over the PRE_NEWS_MINUTES before the news.
+# News in the last HORIZON_MINUTES of a session is measured to the 16:00 close instead
+# (a shorter window -- big news often drops just before the close), as long as at least
+# LATE_NEWS_MIN_MINUTES are left; later news waits for the next open.
 #
 # Labels are a 3-way category: up / down / flat. The model predicts ONE OF
 # THESE THREE LABELS -- it never predicts a percentage/magnitude. The
 # threshold below only decides where "flat" starts; it's a labeling rule,
 # not something the model outputs.
-HORIZON_DAYS = 1
+# Which Event Registry time counts as "when the news came out": "dateTimePub" (when the outlet
+# published it) or "dateTime" (when Event Registry picked it up -- median 6 min later, Reuters
+# ~17). Publish time measures the real reaction, but the backtest is only realistic with a news
+# feed that delivers articles that fast (Event Registry does not).
+NEWS_TIME_FIELD = "dateTimePub"
+# Articles published before this are skipped: archive pages Event Registry re-crawled years
+# later (a 2015 Verge story picked up in 2026). Everything published from here on is kept,
+# however late it was picked up.
+MIN_PUBLISH_DATE = "2023-01-01"
 
-# A move smaller than this (in either direction) gets labeled "flat"
+# Market and sector funds every article is also checked against, whatever Job 2 tagged: one
+# extra row per article per fund, with role "index" (unless Job 2 tagged the fund itself).
+# Market: SPY = S&P 500, QQQ = Nasdaq-100, DIA = Dow Jones, IWM = Russell 2000 (small companies).
+# Sectors: SMH = chip makers, XLE = energy companies (S&P 500 energy stocks),
+# USO = crude oil itself (follows oil futures, not companies). [] turns it off.
+INDEX_TICKERS = ["SPY", "QQQ", "DIA", "IWM", "SMH", "XLE", "USO"]
+HORIZON_MINUTES = 30
+LATE_NEWS_MIN_MINUTES = 10          # news up to 15:50 is measured to the close
+PRE_NEWS_MINUTES = 60
+INTRADAY_BAR_MINUTES = 1             # price resolution: a price "at" a time is the last bar
+                                     # finished by then, so up to this many minutes old
+MARKET_TICKER = "SPY"                # the market's move over the same window, and the trading calendar
+TREND_DAYS = (1, 5)                  # stock's return over this many trading days before the news
+VOLATILITY_DAYS = 20                 # stock's typical daily move, over this many trading days
+
+# A move smaller than the cutoff (in either direction) gets labeled "flat"
 # instead of forced into "up" or "down". Without this, tiny random noise
 # around 0% gets labeled as a real move, which teaches the model to chase
-# noise. Start at 0.5% and adjust based on the label distribution you see
-# after building the dataset.
-FLAT_THRESHOLD_PCT = 0.5
+# noise.
+#
+# FLAT_THRESHOLD_SCALED = True: each stock gets its own cutoff, so "up" means "moved
+# more than usual for this stock" -- 0.2% is a real move for SPY but noise for NVDA.
+# The cutoff is FLAT_THRESHOLD_FRACTION of the stock's usual move over the label's window
+# (HORIZON_MINUTES, or less for news just before the close): its VOLATILITY_DAYS daily
+# volatility scaled down to that window (daily x sqrt(minutes / 390), the usual
+# random-walk scaling). With 0.5 that's roughly
+# SPY ~0.15%, NVDA ~0.4%, a small biotech 1%+.
+# FLAT_THRESHOLD_SCALED = False: one fixed FLAT_THRESHOLD_PCT for every stock.
+# Pick between settings by the VALIDATION results, never the test results.
+FLAT_THRESHOLD_SCALED = True
+FLAT_THRESHOLD_FRACTION = 0.5
+FLAT_THRESHOLD_PCT = 0.2             # fixed mode, and the fallback for a stock with under a week of history
 
 # --- AI ticker tagging (collect/tickers.py, Job 2) ---
 # Each article's headline + a slice of its body goes to Claude (Anthropic Batch API, half
@@ -170,6 +206,15 @@ TAGGING_BATCH_SIZE = 5000
 # which would drop ALL of that article's tickers.
 MAX_COMPANIES_PER_ARTICLE = 20
 
+# --- Local ticker tagger (modeling/tagger.py) ---
+# A local model that learns to copy Claude's tags, so new articles can be tagged instantly
+# and for free. Companies Claude tagged in fewer training articles than TAGGER_MIN_ARTICLES
+# aren't learned (100 -> ~420 companies, 79% of Claude's tags, checked 2026-10-09).
+TAGGER_MIN_ARTICLES = 100
+TAGGER_MAX_FEATURES = 50000          # words/phrases it can use (names need a big vocabulary)
+TAGGER_C = 1.0                       # how closely each yes/no model may fit its examples
+TAGGER_JOBS = 8                      # CPU cores used for training
+
 # --- Repeats of the same story (modeling/dataset.py) ---
 # Several outlets often report the same news within hours (one Event Registry event). Job 2
 # tags all of them; for training, True keeps only the first report and drops other reports
@@ -180,10 +225,14 @@ MAX_COMPANIES_PER_ARTICLE = 20
 DATASET_SKIP_STORY_REPEATS = True
 STORY_REPEAT_HOURS = 24
 
-# --- Text feature (headline + article body -- the model's only input) ---
+# --- Text feature (headline + article body) ---
 # TF-IDF vocabulary size. Larger = more words the model can weigh, but also
 # more room to overfit a short, likely-one-regime dataset. Start here.
 TEXT_MAX_FEATURES = 5000
+
+# Category values (an outlet, a role, ...) seen in fewer training rows than this are
+# grouped together as "infrequent" instead of getting their own weight.
+MIN_CATEGORY_ROWS = 20
 
 # --- Train/val/test split (chronological, never shuffled) ---
 TRAIN_FRACTION = 0.70

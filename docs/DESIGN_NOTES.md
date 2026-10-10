@@ -5,22 +5,49 @@ what's left to do. For setup and how to run it, see `README.md`.
 
 ## Decisions (flag before changing any of these)
 
-1. **Labels are up / down / flat, never a percentage.** `FLAT_THRESHOLD_PCT`
-   (default 0.5%) sets the boundary. The model never outputs a number.
-2. **The model trains on the text plus when the news came out.** TF-IDF over
-   headline + article body, plus `news_session` (weekend, holiday,
-   pre_market, market_hours, after_hours), into logistic regression.
-   `sentiment_score` (Event Registry's own -1..1 score) is stored in the
-   dataset but deliberately not used as a feature.
-3. **The label measures the reaction to the news.** Entry is the last daily
-   close before the article came out (a close counts as known at 4pm New
-   York time); exit is `HORIZON_DAYS` closes later. So Saturday news is
-   measured Friday close → Monday close, and Monday 6pm news Monday close →
-   Tuesday close. Weekends and holidays have no prices, so they're skipped.
-   Tradeoff: for news during market hours, the backtest "buys" at the
-   previous close, which wasn't actually available after the news, so those
-   trades look better than they would be. The backtest breaks results down
-   by `news_session` so you can check this.
+1. **Labels are up / down / flat, never a percentage.** The model never
+   outputs a number. The flat cutoff is per stock (changed 2026-10-09):
+   half of that stock's usual 30-minute move, from its 20-day volatility
+   (`FLAT_THRESHOLD_SCALED`, `FLAT_THRESHOLD_FRACTION`), so "up" means
+   "moved more than usual for this stock" -- 0.2% is a real move for SPY
+   but noise for NVDA. A fixed `FLAT_THRESHOLD_PCT` is the alternative.
+2. **The model trains on the text, when the news came out, and how prices
+   moved before it** (changed 2026-10-09). TF-IDF over headline + article
+   body; the stock's and SPY's move over the hour before the news, volume
+   in that hour vs. usual, the 1- and 5-day trend and 20-day volatility;
+   `news_session`, `role`, outlet, day of week, companies per article and
+   this one's rank -- into logistic regression. Nothing from after the
+   news is an input. `sentiment_score` (Event Registry's own -1..1 score)
+   is stored in the dataset but deliberately not used as a feature.
+3. **The label is the 30-minute move from when you could first trade on the
+   news** (`HORIZON_MINUTES`, changed 2026-10-09 from the next daily close).
+   "When the news came out" is the outlet's publish time (`dateTimePub`,
+   `NEWS_TIME_FIELD`), not when Event Registry picked it up (`dateTime`:
+   median 6 minutes later, Reuters ~17, 12% over 30). Decided 2026-10-09:
+   the user will get articles from a faster feed for live trading, so the
+   backtest is only realistic with such a feed, not with Event Registry.
+   During market hours it runs from the last price before the news to 30
+   minutes later, from 1-minute bars. News in the last 30 minutes of a
+   session runs to the 16:00 close instead (a shorter window, since big
+   news often drops just before the close), if at least 10 minutes are
+   left (`LATE_NEWS_MIN_MINUTES`); the window length is an input
+   (`label_minutes`) and the per-stock cutoff shrinks with it. News while
+   the market is closed (or after 15:50) runs from the next official
+   opening price to 10:00 (`market_time.py` has the rules), so Saturday
+   news is Monday 9:30 → 10:00. The jump from the previous close to that
+   open isn't in the label -- it couldn't be traded -- but is an input
+   (`open_gap_pct`), so the model knows how much is already priced in.
+   Weekends and holidays have no prices, so they're skipped. Tradeoff: for
+   market-hours news the entry price is up to 1 minute before the news,
+   so those trades are slightly optimistic.
+   Articles published before 2023 (`MIN_PUBLISH_DATE`) are skipped: they're
+   archive pages Event Registry re-crawled years later.
+   Every article also gets a row for each market index fund
+   (`INDEX_TICKERS`: SPY, QQQ, DIA, IWM, plus SMH chips, XLE energy and USO
+   oil; role "index"), even if Job 2
+   tagged no company -- added 2026-10-09 so the model learns how news moves
+   the whole market and key sectors. That's ~1.35M index rows next to ~330k company rows,
+   and articles from the same hour share the same index move.
 4. **Train/validation/test split is by date, never shuffled.** Shuffling would
    let the model learn from news published after its test examples.
 5. **One article affecting several companies becomes one row per company.**
