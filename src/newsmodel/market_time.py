@@ -111,3 +111,36 @@ def exit_for_entry(entry: pd.Timestamp) -> pd.Timestamp:
 def exit_time(news_ts: pd.Timestamp, trading_days_sorted: list):
     entry = entry_time(news_ts, trading_days_sorted)
     return None if entry is None else exit_for_entry(entry)
+
+
+# --- Extended hours: pre-market 4:00-9:30 and after hours 16:00-20:00 also trade ---
+EXT_OPEN = pd.Timedelta(hours=4)
+EXT_CLOSE = pd.Timedelta(hours=20)
+
+
+def ext_entry_time(news_ts: pd.Timestamp, trading_days_sorted: list):
+    """With extended hours: at the news if it's 4:00-20:00 on a trading day and at least
+    LATE_NEWS_MIN_MINUTES are left, otherwise 4:00 the next trading day. Earnings at 16:05
+    are traded at 16:05, not at the next morning's open."""
+    min_left = pd.Timedelta(minutes=config.LATE_NEWS_MIN_MINUTES)
+    day = market_date(news_ts)
+    i = bisect.bisect_left(trading_days_sorted, day)
+    if i < len(trading_days_sorted) and trading_days_sorted[i] == day:
+        if news_ts < _at(day, EXT_OPEN):
+            return _at(day, EXT_OPEN)
+        if news_ts + min_left <= _at(day, EXT_CLOSE):
+            return news_ts
+        i += 1
+    if i >= len(trading_days_sorted):
+        return None
+    return _at(trading_days_sorted[i], EXT_OPEN)
+
+
+def ext_exit_for_entry(entry: pd.Timestamp) -> pd.Timestamp:
+    return min(entry + pd.Timedelta(minutes=config.HORIZON_MINUTES), _at(market_date(entry), EXT_CLOSE))
+
+
+def is_regular_window(entry: pd.Timestamp, exit_: pd.Timestamp) -> bool:
+    """True if the whole window is inside 9:30-16:00 (cheaper to trade than extended hours)."""
+    day = market_date(entry)
+    return session_open(day) <= entry and exit_ <= session_close(day)
