@@ -4,7 +4,8 @@ prices cover each article's trading window, then predict and pretend to trade.
 
   every LIVE_NEWS_CHECK_SECONDS   new articles from live/news.py -> articles table
                                   ("waiting", with the time its window's prices
-                                  will be available: market.ready_at)
+                                  will be available: market.ready_at), and all of
+                                  them to the training archive (live/archive.py)
   every few seconds               each waiting article whose time has come:
                                     inputs from prices before the news (as training)
                                     -> the model's down/flat/up for every watched stock
@@ -31,6 +32,7 @@ import pandas as pd
 
 from newsmodel import config
 from newsmodel.keep_awake import keep_awake
+from newsmodel.live import archive
 from newsmodel.live.market import NotReady
 from newsmodel.live.predictor import article_text
 from newsmodel.live.store import Store, now_iso
@@ -100,11 +102,12 @@ class Engine(threading.Thread):
         known = {r["uri"] for r in self.store.rows("SELECT uri FROM articles WHERE published >= ?",
                                                    (iso(since - pd.Timedelta(days=1)),))}
         watched = set(self.predictor.stocks)
-        new = 0
+        new, fresh = 0, []
         for a in items:
             if a["uri"] in known:
                 continue
             known.add(a["uri"])
+            fresh.append(a)
             status, note, entry, exit_, ready = "waiting", None, None, None, None
             symbols = a.get("symbols") or []
             if config.LIVE_WATCHLIST_NEWS_ONLY and symbols and not watched & set(symbols):
@@ -118,6 +121,7 @@ class Engine(threading.Thread):
                            (a["uri"], a["title"], a["body"], a["source"], a["url"], json.dumps(symbols),
                             iso(a["published"]), now_iso(), iso(entry), iso(exit_), iso(ready), status, note))
             new += status == "waiting"
+        archive.save(fresh, now)  # every article, skipped or not, kept for training later
         if items:
             newest = max(pd.Timestamp(a["published"]) for a in items)
             self.store.put("news_since", iso(max(newest, since)))

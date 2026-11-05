@@ -313,6 +313,7 @@ LIVE_MIN_UP_PROB = MIN_CONFIDENCE   # buy when "up" is the most likely answer an
 LIVE_TRADE_DOLLARS = 1000
 LIVE_HOLD_MINUTES = HORIZON_MINUTES  # the window: market_time.entry_time -> exit_for_entry
 LIVE_MAX_LATE_MINUTES = 10          # news reaching us later than this into its window: predicted, not traded
+LIVE_ARCHIVE_MIN_CHARS = 1500       # live/archive.py keeps only articles with a longer body, for training
 # Alpaca's free plan refuses all-exchange (SIP) prices from the last 15 minutes, so an article
 # is processed LIVE_DATA_DELAY_MINUTES + LIVE_DATA_MARGIN_MINUTES after its window ends (live/market.py)
 LIVE_DATA_DELAY_MINUTES = 15
