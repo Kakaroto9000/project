@@ -184,6 +184,7 @@ def main():
     ap.add_argument("--only-named", action="store_true", help="trade only stocks the article names (and funds)")
     ap.add_argument("--only-clean", action="store_true", help="trade only 9:30-16:00 windows and the 300 most traded stocks")
     ap.add_argument("--horizon", type=int, default=None, help="label window in minutes (default HORIZON_MINUTES)")
+    ap.add_argument("--top", type=int, default=0, help="score only the funds + this many most traded companies")
     args = ap.parse_args()
     from newsmodel.modeling.grid_dataset import grid_dir
     if args.horizon:
@@ -199,6 +200,14 @@ def main():
     if args.only_clean:
         ok = art["regular"].to_numpy(bool)[:, None] & (np.arange(len(stocks)) < 300)[None]
         Y = np.where(ok, Y, -1)
+    if args.top:  # only the live app's watchlist: a --top model, or a full model cut down to compare with one
+        from newsmodel.live.predictor import watchlist
+        keep = watchlist(stocks, args.top)
+        cols = np.array([stocks.index(s) for s in keep])
+        Y, M, pre = Y[:, cols], M[:, cols], pre[:, cols]
+        if P.shape[1] == len(stocks):
+            P = P[:, cols]
+        stocks = keep
     v = slice(0, rows["val"][1] - lo)
     t = slice(rows["test"][0] - lo, rows["test"][1] - lo)
     av, at = art.iloc[v].reset_index(drop=True), art.iloc[t].reset_index(drop=True)
