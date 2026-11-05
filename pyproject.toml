@@ -5,16 +5,31 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "newsmodel"
 version = "0.1.0"
-description = "Predict stock direction (up/down/flat) from news text"
+description = "Predict stock direction (up/down/flat) from news text, and watch it live with pretend trades"
 requires-python = ">=3.10"
 dependencies = [
+    # data
     "eventregistry",
     "anthropic>=1.0",
     "alpaca-py",
+    # modeling
     "pandas",
     "pyarrow",
+    "numpy",
+    "scipy",
     "scikit-learn",
     "joblib",
+    "lightgbm",
+    "torch",                  # install the CUDA build from pytorch.org for the GPU
+    "transformers",
+    "sentence-transformers",
+    # live app
+    "fastapi",
+    "uvicorn[standard]",
+    "feedparser",
+    "requests",
+    "beautifulsoup4",
+    "trafilatura",
 ]
 
 [project.scripts]
@@ -22,6 +37,8 @@ job1-fetch-news = "newsmodel.jobs:fetch_news"
 job2-tag-submit = "newsmodel.jobs:tag_submit"
 job2-tag-collect = "newsmodel.jobs:tag_collect"
 job3-train = "newsmodel.jobs:train"
+newstrader-server = "newsmodel.live.server:main"   # the live engine + API (NewsTrader.exe starts it)
+newstrader-engine = "newsmodel.live.engine:main"   # the live engine alone
 
 [tool.setuptools.packages.find]
 where = ["src"]
