@@ -31,8 +31,9 @@ import pandas as pd
 
 from newsmodel import config
 from newsmodel.keep_awake import keep_awake
-from newsmodel.live.store import Store, now_iso
+from newsmodel.live.market import NotReady
 from newsmodel.live.predictor import article_text
+from newsmodel.live.store import Store, now_iso
 
 FIRST_LOOKBACK_HOURS = 6      # on the very first start, collect news this far back
 NEWS_OVERLAP_MINUTES = 360    # re-ask this far before the newest article: RSS items can show up
@@ -109,9 +110,8 @@ class Engine(threading.Thread):
             if config.LIVE_WATCHLIST_NEWS_ONLY and symbols and not watched & set(symbols):
                 status, note = "skipped", "only about stocks outside the watchlist"
             else:
-                window = self.market.window(a["published"])
-                if window:
-                    entry, exit_ = window
+                entry, exit_ = self.market.window(a["published"])
+                if entry is not None:
                     ready = self.market.ready_at(a["published"])
             self.store.run("INSERT OR IGNORE INTO articles (uri, title, body, source, url, symbols, published, received, "
                            "entry, exit, ready, status, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -135,16 +135,19 @@ class Engine(threading.Thread):
                 return
             if a["ready"] is None:  # the window wasn't known yet (e.g. past the calendar): try again
                 ready = self.market.ready_at(pd.Timestamp(a["published"]))
-                window = self.market.window(pd.Timestamp(a["published"]))
-                if ready is None or window is None:
+                entry, exit_ = self.market.window(pd.Timestamp(a["published"]))
+                if ready is None or entry is None:
                     continue
                 self.store.run("UPDATE articles SET entry = ?, exit = ?, ready = ? WHERE uri = ?",
-                               (iso(window[0]), iso(window[1]), iso(ready), a["uri"]))
+                               (iso(entry), iso(exit_), iso(ready), a["uri"]))
                 if iso(ready) > now:
                     continue
-                a["entry"], a["exit"] = iso(window[0]), iso(window[1])
+                a["entry"], a["exit"] = iso(entry), iso(exit_)
             try:
                 self.process(a)
+            except NotReady:  # the delayed prices don't reach the window's end yet: just wait
+                later = pd.Timestamp.now(tz="UTC") + pd.Timedelta(minutes=1)
+                self.store.run("UPDATE articles SET ready = ? WHERE uri = ?", (iso(later), a["uri"]))
             except Exception as e:
                 attempts = (a["attempts"] or 0) + 1
                 give_up = attempts >= MAX_ATTEMPTS
