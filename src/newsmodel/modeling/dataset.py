@@ -252,6 +252,11 @@ def build():
         spy_start, _ = market.price_at(start_ts)
         spy_news, _ = market.price_at(news_ts)
         spy_gap = market.open_gap_pct(entry_day)
+        # The market's own move over the same window as the label, for market-relative
+        # labels and hedged backtests (not a feature: it's in the future at entry time)
+        spy_day = market.day_index(entry_day)
+        spy_entry = (market.daily_open[spy_day] if spy_day is not None else None) if at_open else spy_news
+        market_pct_change = pct(spy_entry, market.price_at(exit_ts)[0])
 
         roles = item.get("ticker_roles", {})
         for ticker in tickers_field:
@@ -332,6 +337,7 @@ def build():
                 "entry_price": entry_price,
                 "exit_price": exit_price,
                 "pct_change": pct_change,  # for backtest P&L only, not a feature or label
+                "market_pct_change": market_pct_change,  # MARKET_TICKER over the same window; not a feature
                 "label": label,
             })
 
