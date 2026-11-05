@@ -291,3 +291,29 @@ COMMISSION_PER_TRADE_PCT = 0.0   # Alpaca is commission-free on stocks, but keep
                                   # the knob in case you add other brokers/assets
 SLIPPAGE_PCT = 0.05               # assume you don't get the exact printed price
 
+# --- Live paper-trading app (live/) ---
+# Reads new articles as they come out and, once the free plan's delayed prices cover the
+# article's trading window, predicts the INDEX_TICKERS plus the LIVE_TOP_COMPANIES most
+# traded companies with the saved model and PRETENDS to buy LIVE_TRADE_DOLLARS of each stock
+# it calls "up" at the window's entry price and sell at its exit price (LIVE_HOLD_MINUTES
+# later). No orders are ever sent; the portfolio is simulated, with SLIPPAGE_PCT each way.
+LIVE_START_CASH = 100_000
+LIVE_DIR = DATA_DIR / "live"
+LIVE_DB_PATH = LIVE_DIR / "live.db"            # news, predictions, outcomes and trades
+LIVE_MODEL_PATH = MODELS_DIR / "news_model.pt"  # regular-hours, 30-minute model (news_model.py)
+LIVE_TOP_COMPANIES = 200            # companies in universe.json order, funds left out
+# Where new articles come from (live/news.py), all free. "Alpaca": Alpaca's news API (Benzinga
+# + press releases, with tickers), real time but not an outlet the model trained on. The rest:
+# RSS feeds of training outlets whose robots.txt allows it (no tickers). Remove a name to turn
+# it off. Event Registry (the training source) is out of tokens.
+LIVE_NEWS_SOURCES = ("Alpaca", "CNBC", "Fortune", "Business Insider", "TechCrunch", "The Verge", "OilPrice")
+LIVE_NEWS_CHECK_SECONDS = 60        # each feed is fetched at most once a minute anyway
+LIVE_WATCHLIST_NEWS_ONLY = True     # skip articles tagged only with stocks outside the watchlist
+LIVE_MIN_UP_PROB = MIN_CONFIDENCE   # buy when "up" is the most likely answer and at least this likely
+LIVE_TRADE_DOLLARS = 1000
+LIVE_HOLD_MINUTES = HORIZON_MINUTES  # the window: market_time.entry_time -> exit_for_entry
+LIVE_MAX_LATE_MINUTES = 10          # news reaching us later than this into its window: predicted, not traded
+# Alpaca's free plan refuses all-exchange (SIP) prices from the last 15 minutes, so an article
+# is processed LIVE_DATA_DELAY_MINUTES + LIVE_DATA_MARGIN_MINUTES after its window ends (live/market.py)
+LIVE_DATA_DELAY_MINUTES = 15
+LIVE_DATA_MARGIN_MINUTES = 1
