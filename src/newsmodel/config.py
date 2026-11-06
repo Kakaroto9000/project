@@ -206,6 +206,37 @@ TAGGING_BATCH_SIZE = 5000
 # which would drop ALL of that article's tickers.
 MAX_COMPANIES_PER_ARTICLE = 20
 
+# --- Article embeddings (modeling/embed.py) ---
+# A small pretrained model that turns each article into numbers capturing its meaning.
+# bge-small: 384 numbers per article, trained on text from before 2024.
+EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"
+EMBEDDING_MAX_TOKENS = 256         # how much of each article it reads (headline + start of body)
+
+# --- Fine-tuned language model (modeling/finetune.py) ---
+# A pretrained model whose every layer is trained further on our own labels.
+FINETUNE_MODEL = "answerdotai/ModernBERT-base"   # 150M parameters, released Dec 2024
+FINETUNE_MAX_TOKENS = 256          # prompt + headline + start of the article
+FINETUNE_BATCH = 32
+FINETUNE_LR = 3e-5
+FINETUNE_EPOCHS = 2
+# The one model for all stocks (modeling/news_model.py): reads each article once and
+# predicts every universe stock, each with a learned profile and its own head.
+NEWS_MODEL_PROFILE = 64            # numbers in each stock's learned profile
+NEWS_MODEL_BATCH = 32              # articles per training step (x 1,000 stocks each)
+NEWS_MODEL_EPOCHS = 3
+
+# --- Company universe (collect/universe.py) ---
+# The most traded US stocks and funds, each checked against every article (a model per
+# company), not only the companies Claude tagged. #1000 trades ~$130M a day (2026-10-09).
+UNIVERSE_SIZE = 1000
+UNIVERSE_DOWNLOAD_THREADS = 2       # days downloaded at once (Alpaca free plan: 200 requests/min)
+# Which companies each article is paired with (modeling/universe_dataset.py): the funds, the
+# companies it names, their closest-moving peers, and the local tagger's picks.
+UNIVERSE_PEERS = 10                 # peers kept per article (most correlated with a named company)
+UNIVERSE_PEER_MIN_CORR = 0.6        # daily-return correlation a peer needs
+UNIVERSE_TAGGER_MIN = 0.2           # tagger score that pairs a company on its own
+UNIVERSE_CLUSTERS = 20              # groups of companies that move together (a model input)
+
 # --- Local ticker tagger (modeling/tagger.py) ---
 # A local model that learns to copy Claude's tags, so new articles can be tagged instantly
 # and for free. Companies Claude tagged in fewer training articles than TAGGER_MIN_ARTICLES
@@ -229,10 +260,26 @@ STORY_REPEAT_HOURS = 24
 # TF-IDF vocabulary size. Larger = more words the model can weigh, but also
 # more room to overfit a short, likely-one-regime dataset. Start here.
 TEXT_MAX_FEATURES = 5000
+# Drop dates, numbers, outlet names and site boilerplate from the text (DATE_AND_SOURCE_WORDS
+# in modeling/train.py). Without it, run 1 (2026-10-09) learned the months, not the news.
+TEXT_CLEAN = True
 
 # Category values (an outlet, a role, ...) seen in fewer training rows than this are
 # grouped together as "infrequent" instead of getting their own weight.
 MIN_CATEGORY_ROWS = 20
+
+# --- Which rows the price model learns from, and how (modeling/train.py, backtest.py) ---
+# Picked 2026-10-09 by VALIDATION results over four runs (run 1 = all rows, absolute
+# moves, C 1.0, every trade: no edge; run 4 = these settings: best, see the run report).
+# "all" = every row; "companies" = no INDEX_TICKERS rows; "direct_companies" = only
+# companies the article is about (role "direct")
+TRAIN_ROWS = "direct_companies"
+# Company rows: "up" = beat MARKET_TICKER by more than the cutoff over the same window,
+# and the backtest hedges each trade with it (paying costs on both). Fund rows keep their
+# own move. Over 30 minutes most of a stock's move is the market's.
+LABEL_VS_MARKET = True
+MODEL_C = 0.05                       # lower = more cautious word weights (run 1 used 1.0)
+MIN_CONFIDENCE = 0.45                # the backtest only trades predictions at least this sure
 
 # --- Train/val/test split (chronological, never shuffled) ---
 TRAIN_FRACTION = 0.70
@@ -243,3 +290,32 @@ VAL_FRACTION = 0.15
 COMMISSION_PER_TRADE_PCT = 0.0   # Alpaca is commission-free on stocks, but keep
                                   # the knob in case you add other brokers/assets
 SLIPPAGE_PCT = 0.05               # assume you don't get the exact printed price
+
+# --- Live paper-trading app (live/) ---
+# Reads new articles as they come out and, once the free plan's delayed prices cover the
+# article's trading window, predicts the INDEX_TICKERS plus the LIVE_TOP_COMPANIES most
+# traded companies with the saved model and PRETENDS to buy LIVE_TRADE_DOLLARS of each stock
+# it calls "up" at the window's entry price and sell at its exit price (LIVE_HOLD_MINUTES
+# later). No orders are ever sent; the portfolio is simulated, with SLIPPAGE_PCT each way.
+LIVE_START_CASH = 100_000
+LIVE_DIR = DATA_DIR / "live"
+LIVE_DB_PATH = LIVE_DIR / "live.db"            # news, predictions, outcomes and trades
+LIVE_MODEL_PATH = MODELS_DIR / "news_model.pt"  # regular-hours, 30-minute model (news_model.py)
+LIVE_TOP_COMPANIES = 200            # companies in universe.json order, funds left out
+# Where new articles come from (live/news.py), all free. "Alpaca": Alpaca's news API (Benzinga
+# + press releases, with tickers), real time but not an outlet the model trained on. The rest:
+# RSS feeds of training outlets whose robots.txt allows it (no tickers). Remove a name to turn
+# it off. Event Registry (the training source) is out of tokens.
+LIVE_NEWS_SOURCES = ("Alpaca", "CNBC", "Fortune", "Business Insider", "TechCrunch", "The Verge", "OilPrice")
+LIVE_NEWS_CHECK_SECONDS = 60        # each feed is fetched at most once a minute anyway
+LIVE_WATCHLIST_NEWS_ONLY = True     # skip articles tagged only with stocks outside the watchlist
+LIVE_MIN_UP_PROB = 0.80             # buy when "up" is the most likely answer and at least this likely...
+LIVE_MAX_BUYS_PER_ARTICLE = 3       # ...and only the article's most confident up calls (news_eval's best rule: top 3, >= 80%)
+LIVE_TRADE_DOLLARS = 1000
+LIVE_HOLD_MINUTES = HORIZON_MINUTES  # the window: market_time.entry_time -> exit_for_entry
+LIVE_MAX_LATE_MINUTES = 10          # news reaching us later than this into its window: predicted, not traded
+LIVE_ARCHIVE_MIN_CHARS = 1500       # live/archive.py keeps only articles with a longer body, for training
+# Alpaca's free plan refuses all-exchange (SIP) prices from the last 15 minutes, so an article
+# is processed LIVE_DATA_DELAY_MINUTES + LIVE_DATA_MARGIN_MINUTES after its window ends (live/market.py)
+LIVE_DATA_DELAY_MINUTES = 15
+LIVE_DATA_MARGIN_MINUTES = 1

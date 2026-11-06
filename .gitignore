@@ -13,3 +13,7 @@ models/*
 !models/.gitkeep
 
 .env
+
+# The live app: its built window (from ui/, see README) and its data
+NewsTrader.exe
+data/live/

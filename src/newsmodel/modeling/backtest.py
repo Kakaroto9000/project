@@ -16,16 +16,19 @@ import joblib
 
 from newsmodel import config
 from newsmodel.modeling.dataset import DATASET_PATH
-from newsmodel.modeling.train import MODEL_PATH, build_features, chronological_split, load_articles
+from newsmodel.modeling.train import MODEL_PATH, build_features, chronological_split, load_articles, prepare_rows
 
 TRADES_PATH = config.PROCESSED_DIR / "backtest_trades.csv"
 
 
-def simulate(test_df: pd.DataFrame, predictions):
+def simulate(test_df: pd.DataFrame, predictions, confidence):
     """
     On each "up" prediction, buy $1 notional at entry_price and sell at
-    exit_price; on each "down", short $1 the same way. "flat" predictions
-    are skipped (no trade).
+    exit_price; on each "down", short $1 the same way. "flat" predictions,
+    and predictions less sure than MIN_CONFIDENCE, are skipped (no trade).
+    With LABEL_VS_MARKET, company trades are hedged: $1 the opposite way in
+    MARKET_TICKER, so they earn the stock's move minus the market's, and pay
+    costs on both legs.
 
     Ignores position sizing, concentration, and finite capital -- it tells
     you whether the SIGNAL has edge, not what a portfolio would return.
@@ -37,15 +40,15 @@ def simulate(test_df: pd.DataFrame, predictions):
     little after reading it. Compare them in the per-timing breakdown.
     """
     trades = []
-    for (_, row), pred in zip(test_df.iterrows(), predictions):
-        if pred == "flat":
+    for (_, row), pred, sure in zip(test_df.iterrows(), predictions, confidence):
+        if pred == "flat" or sure < config.MIN_CONFIDENCE:
             continue
 
         direction = 1 if pred == "up" else -1
-        gross_return_pct = direction * row["pct_change"]
+        gross_return_pct = direction * row["trade_move"]
 
-        # Slippage on both entry and exit, plus commission. Pessimistic on purpose.
-        cost_pct = config.SLIPPAGE_PCT * 2 + config.COMMISSION_PER_TRADE_PCT
+        # Slippage on both entry and exit, plus commission, per leg. Pessimistic on purpose.
+        cost_pct = (config.SLIPPAGE_PCT * 2 + config.COMMISSION_PER_TRADE_PCT) * (2 if row["hedged"] else 1)
         net_return_pct = gross_return_pct - cost_pct
 
         trades.append({
@@ -110,12 +113,14 @@ def main():
     saved = joblib.load(MODEL_PATH)
     model, featurizer = saved["model"], saved["featurizer"]
 
-    df = pd.read_parquet(DATASET_PATH)
+    df = prepare_rows(pd.read_parquet(DATASET_PATH))
     _, _, test = chronological_split(df)
 
-    predictions = model.predict(build_features(test, featurizer, fit=False, texts=load_articles()))
+    proba = model.predict_proba(build_features(test, featurizer, fit=False, texts=load_articles()))
+    predictions = model.classes_[proba.argmax(axis=1)]
+    print(f"Trading predictions at least {config.MIN_CONFIDENCE:.0%} sure (MIN_CONFIDENCE)")
 
-    trades = simulate(test, predictions)
+    trades = simulate(test, predictions, proba.max(axis=1))
     summarize(trades)
 
     config.PROCESSED_DIR.mkdir(parents=True, exist_ok=True)

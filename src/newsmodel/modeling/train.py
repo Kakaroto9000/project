@@ -44,7 +44,7 @@ import numpy as np
 import pandas as pd
 import scipy.sparse as sp
 from sklearn.compose import ColumnTransformer
-from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.feature_extraction.text import ENGLISH_STOP_WORDS, TfidfVectorizer
 from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import classification_report, confusion_matrix
@@ -62,6 +62,42 @@ NUMERIC_COLS = [
     "hours_to_entry", "label_minutes", "n_tickers", "ticker_rank",
 ]
 CATEGORY_COLS = ["news_session", "entry", "role", "source_name", "day_of_week"]
+
+# Words that say WHEN or WHERE an article was published rather than what happened. Run 1
+# (2026-10-09) learned "aug reuters" -> up and "feb" -> down: how the market moved in those
+# months, not what the news said. TEXT_CLEAN drops these, plus all numbers.
+DATE_AND_SOURCE_WORDS = frozenset("""
+    jan feb mar apr jun jul aug sep sept oct nov dec january february march april may june
+    july august september october november december monday tuesday wednesday thursday friday
+    saturday sunday today yesterday tomorrow week weekend month year quarter
+    reuters cnbc ap axios fortune verge techcrunch fiercebiotech oilprice insider business
+    bloomberg wsj journal reporting editing writing reporter reporters newsletter subscribe
+    sign click tab suggested topics read story stories updated published copyright
+""".split())
+
+
+def prepare_rows(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    The rows the model learns from and trades (TRAIN_ROWS), and what counts as
+    up/down (LABEL_VS_MARKET). Adds trade_move -- the % a trade on the row earns
+    before costs -- and hedged -- whether that trade also takes the opposite
+    position in MARKET_TICKER.
+    """
+    fund = df["ticker"].isin(config.INDEX_TICKERS)
+    if config.TRAIN_ROWS == "companies":
+        df = df[~fund]
+    elif config.TRAIN_ROWS == "direct_companies":
+        df = df[~fund & (df["role"] == "direct")]
+    elif config.TRAIN_ROWS != "all":
+        raise SystemExit(f"Unknown TRAIN_ROWS {config.TRAIN_ROWS!r}: use all, companies or direct_companies.")
+    df = df.copy()
+    hedged = config.LABEL_VS_MARKET & ~df["ticker"].isin(config.INDEX_TICKERS).to_numpy()
+    df["hedged"] = hedged
+    df["trade_move"] = np.where(hedged, df["pct_change"] - df["market_pct_change"], df["pct_change"])
+    if config.LABEL_VS_MARKET:
+        move, cutoff = df["trade_move"], df["flat_threshold_pct"]
+        df["label"] = np.where(move > cutoff, "up", np.where(move < -cutoff, "down", "flat"))
+    return df
 
 
 def chronological_split(df: pd.DataFrame):
@@ -104,11 +140,14 @@ class Featurizer:
     """
 
     def __init__(self):
+        clean = config.TEXT_CLEAN
         self.text = TfidfVectorizer(
             max_features=config.TEXT_MAX_FEATURES,
             ngram_range=(1, 2),
             min_df=5,
-            stop_words="english",
+            stop_words=sorted(ENGLISH_STOP_WORDS | DATE_AND_SOURCE_WORDS) if clean else "english",
+            # Clean: words of letters only, so no numbers, years or "q3"
+            token_pattern=r"(?u)\b[a-z][a-z]+\b" if clean else r"(?u)\b\w\w+\b",
             dtype=np.float32,
         )
         self.rest = ColumnTransformer([
@@ -163,7 +202,8 @@ def main():
     if not DATASET_PATH.exists():
         raise SystemExit("No dataset yet. Run python -m newsmodel.modeling.dataset (or job3-train) first.")
 
-    df = pd.read_parquet(DATASET_PATH)
+    df = prepare_rows(pd.read_parquet(DATASET_PATH))
+    print(f"Rows: {config.TRAIN_ROWS}, labels vs. market: {config.LABEL_VS_MARKET}, C: {config.MODEL_C}")
     texts = load_articles()
     train, val, test = chronological_split(df)
 
@@ -174,7 +214,7 @@ def main():
 
     y_train, y_val, y_test = train["label"], val["label"], test["label"]
 
-    model = LogisticRegression(max_iter=1000, class_weight="balanced")
+    model = LogisticRegression(max_iter=1000, class_weight="balanced", C=config.MODEL_C)
     model.fit(X_train, y_train)
 
     evaluate(model, X_train, y_train, "TRAIN (sanity check only -- expect this to look better than test)")
@@ -207,9 +247,15 @@ def main():
                 print(f"  {name.removeprefix(prefix):24s} {weights}")
 
     config.MODELS_DIR.mkdir(parents=True, exist_ok=True)
-    joblib.dump({"model": model, "featurizer": featurizer}, MODEL_PATH)
+    settings = {k: getattr(config, k) for k in ("TRAIN_ROWS", "LABEL_VS_MARKET", "MODEL_C", "TEXT_CLEAN",
+                                                 "TEXT_MAX_FEATURES", "HORIZON_MINUTES", "NEWS_TIME_FIELD")}
+    joblib.dump({"model": model, "featurizer": featurizer, "settings": settings}, MODEL_PATH)
     print(f"\nSaved model to {MODEL_PATH}")
 
 
 if __name__ == "__main__":
-    main()
+    # Through the package import, so the saved Featurizer is stored as
+    # newsmodel.modeling.train.Featurizer, not __main__.Featurizer -- otherwise
+    # backtest.py (or anything else) can't load the model.
+    from newsmodel.modeling import train
+    train.main()

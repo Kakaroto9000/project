@@ -1,0 +1,17 @@
+[package]
+name = "news-trader"
+version = "1.0.0"
+description = "News Trader: the live pretend-trading window"
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+
+[profile.release]
+strip = true
+lto = true
+codegen-units = 1

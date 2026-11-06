@@ -48,9 +48,10 @@ def get_unique_tickers(news_items):
     return sorted(tickers)
 
 
-def fetch_bars(client, symbols: list, timeframe, start: datetime, end: datetime) -> pd.DataFrame:
+def fetch_bars(client, symbols: list, timeframe, start: datetime, end: datetime, feed: str = "sip") -> pd.DataFrame:
     """Bars for several symbols in one request (the SDK pages through them).
-    Rate limits and server errors are retried with a growing wait."""
+    Rate limits and server errors are retried with a growing wait. feed="iex" for the
+    last 15 minutes on the free plan, which only allows older SIP data."""
     from alpaca.common.exceptions import APIError
     from alpaca.data.enums import Adjustment, DataFeed
     from alpaca.data.requests import StockBarsRequest
@@ -61,7 +62,7 @@ def fetch_bars(client, symbols: list, timeframe, start: datetime, end: datetime)
         start=start,
         end=end,
         adjustment=Adjustment.SPLIT,
-        feed=DataFeed.SIP,  # all US exchanges; IEX alone sees ~2% of volume
+        feed=DataFeed(feed),  # SIP = all US exchanges; IEX alone sees ~2% of volume
     )
     for attempt in range(4):
         try:
