@@ -10,7 +10,8 @@ prices cover each article's trading window, then predict and pretend to trade.
                                     inputs from prices before the news (as training)
                                     -> the model's down/flat/up for every watched stock
                                     -> what actually happened over the window
-                                    -> a pretend trade for every "up" call
+                                    -> a pretend trade for its strongest "up" calls
+                                       (at most LIVE_MAX_BUYS_PER_ARTICLE, each >= LIVE_MIN_UP_PROB)
 
 Pretend trades: LIVE_TRADE_DOLLARS bought at the window's entry price and sold
 at its exit price, each side SLIPPAGE_PCT worse, any number at once. No orders
@@ -43,6 +44,15 @@ NEWS_OVERLAP_MINUTES = 360    # re-ask this far before the newest article: RSS i
 RETRY_MINUTES = 5             # a failed article is retried this much later...
 MAX_ATTEMPTS = 3              # ...this many times
 ARTICLES_PER_PASS = 5         # then the news is checked again
+
+
+def buy_calls(probs: np.ndarray) -> np.ndarray:
+    """Up calls at least LIVE_MIN_UP_PROB sure, only the LIVE_MAX_BUYS_PER_ARTICLE most confident."""
+    ok = (probs.argmax(1) == 2) & (probs[:, 2] >= config.LIVE_MIN_UP_PROB)
+    keep = np.argsort(-np.where(ok, probs[:, 2], -1))[:config.LIVE_MAX_BUYS_PER_ARTICLE]
+    buy = np.zeros(len(probs), bool)
+    buy[keep] = ok[keep]
+    return buy
 
 
 def iso(ts) -> str:
@@ -166,18 +176,20 @@ class Engine(threading.Thread):
         prices, article = self.market.inputs(stocks, news_ts, entry, exit_)
         probs = self.predictor.predict(article_text(a["title"], a["body"]), prices, article)
         out = self.market.outcome(stocks, news_ts, entry, exit_)
-        buy = (probs.argmax(1) == 2) & (probs[:, 2] >= config.LIVE_MIN_UP_PROB)
+        buy = buy_calls(probs)
         late = (pd.Timestamp(a["received"]) - entry).total_seconds() / 60
         tradable = late <= config.LIVE_MAX_LATE_MINUTES
 
         num = lambda v: None if v is None or not np.isfinite(v) else float(v)
         preds, trades = [], []
+        held = {r["ticker"] for r in self.store.rows(  # pretend positions still open at this entry
+            "SELECT ticker FROM trades WHERE buy_time <= ? AND sell_time > ?", (a["entry"], a["entry"]))}
         slip = config.SLIPPAGE_PCT / 100
         for i, t in enumerate(stocks):
             ep, xp = out["entry_price"][i], out["exit_price"][i]
             preds.append((a["uri"], t, *map(float, probs[i]), int(buy[i]), num(ep), num(xp), num(out["raw_move"][i]),
                           num(out["move"][i]), num(out["threshold"][i]), out["label"][i]))
-            if tradable and buy[i] and np.isfinite(ep) and np.isfinite(xp):
+            if tradable and buy[i] and t not in held and np.isfinite(ep) and np.isfinite(xp):  # never buy a stock already held
                 bp, sp = ep * (1 + slip), xp * (1 - slip)
                 qty = config.LIVE_TRADE_DOLLARS / bp
                 trades.append((a["uri"], t, float(probs[i, 2]), a["entry"], bp, qty, a["exit"], sp,

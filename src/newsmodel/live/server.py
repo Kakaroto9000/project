@@ -79,7 +79,8 @@ def status():
         "model": config.LIVE_MODEL_PATH.name, "sources": list(getattr(config, "LIVE_NEWS_SOURCES", [])),
         "settings": {"start_cash": config.LIVE_START_CASH, "trade_dollars": config.LIVE_TRADE_DOLLARS,
                      "hold_minutes": config.LIVE_HOLD_MINUTES, "slippage_pct": config.SLIPPAGE_PCT,
-                     "min_up_prob": config.LIVE_MIN_UP_PROB, "max_late_minutes": config.LIVE_MAX_LATE_MINUTES},
+                     "min_up_prob": config.LIVE_MIN_UP_PROB, "max_late_minutes": config.LIVE_MAX_LATE_MINUTES,
+                     "max_buys_per_article": config.LIVE_MAX_BUYS_PER_ARTICLE},
     })
 
 

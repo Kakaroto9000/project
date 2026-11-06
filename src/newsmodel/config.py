@@ -309,7 +309,8 @@ LIVE_TOP_COMPANIES = 200            # companies in universe.json order, funds le
 LIVE_NEWS_SOURCES = ("Alpaca", "CNBC", "Fortune", "Business Insider", "TechCrunch", "The Verge", "OilPrice")
 LIVE_NEWS_CHECK_SECONDS = 60        # each feed is fetched at most once a minute anyway
 LIVE_WATCHLIST_NEWS_ONLY = True     # skip articles tagged only with stocks outside the watchlist
-LIVE_MIN_UP_PROB = MIN_CONFIDENCE   # buy when "up" is the most likely answer and at least this likely
+LIVE_MIN_UP_PROB = 0.80             # buy when "up" is the most likely answer and at least this likely...
+LIVE_MAX_BUYS_PER_ARTICLE = 3       # ...and only the article's most confident up calls (news_eval's best rule: top 3, >= 80%)
 LIVE_TRADE_DOLLARS = 1000
 LIVE_HOLD_MINUTES = HORIZON_MINUTES  # the window: market_time.entry_time -> exit_for_entry
 LIVE_MAX_LATE_MINUTES = 10          # news reaching us later than this into its window: predicted, not traded
